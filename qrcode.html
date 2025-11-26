@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic QR Code Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- QRCode library -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    
+    <!-- NOTE: Firebase is imported via module below. No script tags needed here. -->
+
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f3f4f6; }
+        .tab-btn.active { border-bottom: 2px solid #4f46e5; color: #4f46e5; font-weight: 600; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #4f46e5; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- MAIN APP CONTAINER -->
+    <div id="appContainer" class="bg-white w-full max-w-md rounded-xl shadow-xl overflow-hidden min-h-[600px] flex flex-col relative">
+        
+        <!-- HEADER -->
+        <div class="bg-white border-b border-gray-100 p-4 flex justify-between items-center z-10">
+            <h1 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4h2v-4zM6 6h2v2H6V6zm0 12h2v2H6v-2zm12-12h2v2h-2V6z" />
+                </svg>
+                Dynamic QR Tool
+            </h1>
+            <div id="loadingIndicator" class="hidden"><div class="loader"></div></div>
+        </div>
+
+        <!-- TABS (Only visible in Admin Mode) -->
+        <div id="tabsContainer" class="flex border-b border-gray-100 bg-gray-50">
+            <button onclick="switchTab('create')" id="tab-create" class="tab-btn active flex-1 py-3 text-sm text-gray-500 hover:bg-gray-100 transition">Create New</button>
+            <button onclick="switchTab('list')" id="tab-list" class="tab-btn flex-1 py-3 text-sm text-gray-500 hover:bg-gray-100 transition">My Codes</button>
+            <button onclick="switchTab('settings')" id="tab-settings" class="tab-btn flex-1 py-3 text-sm text-gray-500 hover:bg-gray-100 transition">Settings</button>
+        </div>
+
+        <!-- CONTENT AREA -->
+        <div class="p-6 flex-1 overflow-y-auto relative">
+
+            <!-- VIEW 1: CREATE -->
+            <div id="view-create" class="space-y-4">
+                <div class="bg-indigo-50 border border-indigo-100 rounded-lg p-4 mb-4">
+                    <p class="text-xs text-indigo-700">
+                        <strong>How it works:</strong> We create a permanent QR code. You can change the text it displays anytime later without re-printing the QR code.
+                    </p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">QR Name (for you)</label>
+                    <input type="text" id="createName" placeholder="e.g., Shop Menu, WiFi" class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Content (Text or Link)</label>
+                    <textarea id="createContent" placeholder="https://mysite.com/menu or Hello World" class="w-full p-2 border border-gray-300 rounded h-24 resize-none focus:ring-2 focus:ring-indigo-500 outline-none"></textarea>
+                </div>
+
+                <button onclick="createDynamicQR()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg shadow-sm transition transform active:scale-95">
+                    Generate Dynamic QR
+                </button>
+            </div>
+
+            <!-- VIEW 2: LIST -->
+            <div id="view-list" class="hidden space-y-3">
+                <p id="noCodesMsg" class="text-center text-gray-400 text-sm mt-8 hidden">No codes created yet.</p>
+                <div id="codesList" class="space-y-3 pb-4">
+                    <!-- Items injected here via JS -->
+                </div>
+            </div>
+
+            <!-- VIEW 3: SETTINGS -->
+            <div id="view-settings" class="hidden space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Base URL (Important for Phones)</label>
+                    <p class="text-xs text-gray-500 mb-2">If you scan the QR with a phone, it must be able to reach this address. If you are testing locally, this might be a "localhost" or "blob" URL which phones cannot reach.</p>
+                    <input type="text" id="baseUrlInput" class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
+                </div>
+                <button onclick="saveSettings()" class="bg-gray-800 text-white text-sm px-4 py-2 rounded hover:bg-gray-900 transition">Save URL</button>
+            </div>
+
+            <!-- VIEW 4: EDIT (Overlay) -->
+            <div id="view-edit" class="hidden absolute inset-0 bg-white z-20 p-6 flex flex-col">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-bold text-gray-800">Edit Content</h2>
+                    <button onclick="closeEdit()" class="text-gray-400 hover:text-gray-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                
+                <input type="hidden" id="editId">
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">New Content</label>
+                    <textarea id="editContent" class="w-full p-3 border border-gray-300 rounded h-32 resize-none focus:ring-2 focus:ring-indigo-500 outline-none"></textarea>
+                </div>
+
+                <button onclick="updateContent()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg shadow-sm mb-3">
+                    Save Changes
+                </button>
+                <p class="text-xs text-center text-gray-500">The QR code image will NOT change, but scanning it will show this new content.</p>
+            </div>
+
+            <!-- VIEW 5: RESULT / SCANNER VIEW -->
+            <div id="view-scan" class="hidden flex flex-col items-center justify-center h-full text-center space-y-4 pt-10">
+                <div id="scanLoader" class="loader mb-4"></div>
+                <div id="scanContent" class="hidden w-full px-6">
+                    <div class="bg-green-50 text-green-800 p-6 rounded-xl border border-green-100 shadow-sm w-full break-words mb-6">
+                        <h3 class="text-sm font-bold uppercase tracking-wide text-green-600 mb-2">Message</h3>
+                        <p id="scanText" class="text-lg font-medium"></p>
+                    </div>
+                    
+                    <a id="scanLink" href="#" target="_blank" class="hidden w-full bg-indigo-600 text-white px-6 py-4 rounded-lg font-bold shadow-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+                        Open Website
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                    </a>
+                </div>
+                <div id="scanError" class="hidden text-red-500 text-sm">
+                    Content not found or deleted.
+                </div>
+            </div>
+
+            <!-- SUCCESS MODAL (After Creation) -->
+            <div id="successModal" class="hidden absolute inset-0 bg-white/95 z-30 flex flex-col items-center justify-center p-6 text-center">
+                <h3 class="text-2xl font-bold text-gray-800 mb-2">QR Code Ready!</h3>
+                
+                <!-- Warning for Hosting -->
+                <div id="hostingWarning" class="hidden bg-yellow-50 text-yellow-800 p-3 rounded text-xs mb-4 max-w-xs border border-yellow-200">
+                    <strong>Warning:</strong> The link below looks local. If you scan this with a phone, it might not work unless you host this file on a public website.
+                </div>
+
+                <div class="bg-white p-2 rounded shadow-lg border border-gray-200 mb-4">
+                    <canvas id="qrCanvas"></canvas>
+                </div>
+                
+                <p class="text-xs text-gray-400 mb-1">Target Link (Encoded in QR):</p>
+                <div class="bg-gray-100 p-2 rounded text-xs text-gray-600 break-all mb-4 w-full max-w-xs select-all" id="targetLinkDisplay">
+                    ...
+                </div>
+
+                <div class="flex flex-col gap-2 w-full max-w-xs">
+                    <a id="testLinkBtn" href="#" target="_blank" class="w-full bg-white border border-gray-300 text-gray-700 py-2 rounded hover:bg-gray-50 transition text-sm">
+                        Test Link (Click Me)
+                    </a>
+                    <div class="flex gap-2">
+                        <button onclick="downloadQR()" class="flex-1 bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 transition">Download Image</button>
+                        <button onclick="closeSuccessModal()" class="flex-1 bg-gray-200 text-gray-800 py-2 rounded hover:bg-gray-300 transition">Done</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Config (Using Environment Variables)
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // --- GLOBAL STATE ---
+        let currentUser = null;
+        let myCodes = [];
+        
+        // Safely load local storage
+        try {
+            myCodes = JSON.parse(localStorage.getItem('my_qr_codes') || '[]');
+        } catch(e) {
+            console.warn("LocalStorage access denied", e);
+        }
+
+        // --- AUTHENTICATION ---
+        async function initAuth() {
+            showLoading(true);
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Auth error:", error);
+                alert("Authentication failed. Please refresh.");
+            }
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            showLoading(false);
+            if (user) {
+                checkUrlParams(); // Check if we are in "Viewer/Scanner" mode
+            }
+        });
+
+        // --- ROUTING / TABS ---
+        window.switchTab = function(tab) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active', 'text-indigo-600'));
+            document.getElementById(`tab-${tab}`).classList.add('active', 'text-indigo-600');
+            
+            ['create', 'list', 'settings'].forEach(v => {
+                document.getElementById(`view-${v}`).classList.add('hidden');
+            });
+            document.getElementById(`view-${tab}`).classList.remove('hidden');
+
+            if (tab === 'list') renderList();
+            if (tab === 'settings') loadSettings();
+        }
+
+        function checkUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const qrId = urlParams.get('id');
+
+            if (qrId) {
+                // Viewer Mode
+                document.getElementById('tabsContainer').classList.add('hidden');
+                document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
+                document.getElementById('view-scan').classList.remove('hidden');
+                loadScanContent(qrId);
+            } else {
+                // Admin Mode
+                if(!document.getElementById('view-create').classList.contains('hidden') || 
+                   !document.getElementById('view-list').classList.contains('hidden') || 
+                   !document.getElementById('view-settings').classList.contains('hidden')) {
+                       return; 
+                   }
+                switchTab('create');
+            }
+        }
+
+        // --- CORE FUNCTIONS ---
+
+        // 1. Create Code
+        window.createDynamicQR = async function() {
+            if (!currentUser) return alert("Please wait for connection...");
+            const name = document.getElementById('createName').value.trim() || "Untitled";
+            const content = document.getElementById('createContent').value.trim();
+
+            if (!content) return alert("Please enter content.");
+
+            const id = Math.random().toString(36).substring(2, 10);
+            const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'dynamic_qrs');
+            
+            showLoading(true);
+            try {
+                // Save to Firestore
+                await setDoc(doc(collectionRef, id), {
+                    content: content,
+                    name: name,
+                    createdAt: new Date().toISOString(),
+                    creatorId: currentUser.uid
+                });
+
+                // Save to Local Storage (safely)
+                try {
+                    myCodes.push({ id, name, content });
+                    localStorage.setItem('my_qr_codes', JSON.stringify(myCodes));
+                } catch(e) { console.warn("Could not save to local storage"); }
+
+                // Determine Base URL
+                let baseUrl = window.location.href.split('?')[0];
+                try {
+                    const savedUrl = localStorage.getItem('qr_base_url');
+                    if (savedUrl) baseUrl = savedUrl;
+                } catch(e) {}
+
+                // Check for localhost/blob issues
+                const isLocal = baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') || baseUrl.startsWith('blob:') || baseUrl.includes('file:');
+                if (isLocal) {
+                    document.getElementById('hostingWarning').classList.remove('hidden');
+                } else {
+                    document.getElementById('hostingWarning').classList.add('hidden');
+                }
+
+                const targetUrl = `${baseUrl}?id=${id}`;
+                
+                // Show link in UI for debugging
+                document.getElementById('targetLinkDisplay').textContent = targetUrl;
+                document.getElementById('testLinkBtn').href = targetUrl;
+
+                // Generate QR
+                const canvas = document.getElementById('qrCanvas');
+                await QRCode.toCanvas(canvas, targetUrl, { width: 200, margin: 2 });
+
+                // Show Success
+                document.getElementById('successModal').classList.remove('hidden');
+                
+                // Clear inputs
+                document.getElementById('createName').value = '';
+                document.getElementById('createContent').value = '';
+                
+            } catch (e) {
+                console.error(e);
+                alert("Error creating code: " + e.message);
+            }
+            showLoading(false);
+        }
+
+        // 2. Render List
+        function renderList() {
+            const listEl = document.getElementById('codesList');
+            const msgEl = document.getElementById('noCodesMsg');
+            listEl.innerHTML = '';
+
+            if (myCodes.length === 0) {
+                msgEl.classList.remove('hidden');
+                return;
+            }
+            msgEl.classList.add('hidden');
+
+            [...myCodes].reverse().forEach(code => {
+                const item = document.createElement('div');
+                item.className = "bg-white border border-gray-200 p-4 rounded-lg flex justify-between items-center shadow-sm hover:shadow-md transition";
+                item.innerHTML = `
+                    <div class="overflow-hidden">
+                        <h4 class="font-bold text-gray-800 truncate">${code.name}</h4>
+                        <p class="text-xs text-gray-500 truncate w-48">${code.content}</p>
+                    </div>
+                    <button onclick="openEdit('${code.id}')" class="text-indigo-600 hover:text-indigo-800 text-sm font-semibold border border-indigo-100 bg-indigo-50 px-3 py-1 rounded">
+                        Edit
+                    </button>
+                `;
+                listEl.appendChild(item);
+            });
+        }
+
+        // 3. Edit Flow
+        window.openEdit = function(id) {
+            const code = myCodes.find(c => c.id === id);
+            if (!code) return;
+
+            document.getElementById('editId').value = id;
+            document.getElementById('editContent').value = code.content;
+            document.getElementById('view-edit').classList.remove('hidden');
+        }
+
+        window.closeEdit = function() {
+            document.getElementById('view-edit').classList.add('hidden');
+        }
+
+        window.updateContent = async function() {
+            const id = document.getElementById('editId').value;
+            const newContent = document.getElementById('editContent').value.trim();
+            
+            if (!newContent) return alert("Content cannot be empty");
+
+            showLoading(true);
+            try {
+                // Update Firestore
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'dynamic_qrs', id);
+                await updateDoc(docRef, { content: newContent });
+
+                // Update Local Storage
+                const index = myCodes.findIndex(c => c.id === id);
+                if (index !== -1) {
+                    myCodes[index].content = newContent;
+                    try {
+                        localStorage.setItem('my_qr_codes', JSON.stringify(myCodes));
+                    } catch(e) {}
+                }
+
+                closeEdit();
+                if (document.getElementById('tab-list').classList.contains('active')) {
+                    renderList();
+                }
+                alert("Updated successfully! The existing QR code will now show this new content.");
+
+            } catch (e) {
+                console.error(e);
+                alert("Error updating: " + e.message);
+            }
+            showLoading(false);
+        }
+
+        // 4. Viewer Logic (When scanned)
+        async function loadScanContent(id) {
+            const scanLoader = document.getElementById('scanLoader');
+            const scanContent = document.getElementById('scanContent');
+            const scanError = document.getElementById('scanError');
+            const scanText = document.getElementById('scanText');
+            const scanLink = document.getElementById('scanLink');
+
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'dynamic_qrs', id);
+                const docSnap = await getDoc(docRef);
+
+                scanLoader.classList.add('hidden');
+
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    const content = data.content;
+
+                    // Check if URL
+                    const isUrl = /^(http|https):\/\//.test(content);
+
+                    if (isUrl) {
+                        scanText.textContent = "Redirecting...";
+                        
+                        // Show link button IMMEDIATELY so user can click if redirect fails
+                        scanLink.href = content;
+                        scanLink.classList.remove('hidden');
+                        
+                        // Attempt Redirect
+                        setTimeout(() => {
+                            window.location.href = content;
+                        }, 500); // Small delay to let UI render
+                        
+                    } else {
+                        // Plain Text
+                        scanText.textContent = content;
+                        scanLink.classList.add('hidden');
+                    }
+                    scanContent.classList.remove('hidden');
+                } else {
+                    scanError.classList.remove('hidden');
+                }
+            } catch (e) {
+                console.error(e);
+                scanLoader.classList.add('hidden');
+                scanError.classList.remove('hidden');
+            }
+        }
+
+        // 5. Settings & Utils
+        window.loadSettings = function() {
+            try {
+                document.getElementById('baseUrlInput').value = localStorage.getItem('qr_base_url') || window.location.href.split('?')[0];
+            } catch(e) {
+                document.getElementById('baseUrlInput').value = window.location.href.split('?')[0];
+            }
+        }
+
+        window.saveSettings = function() {
+            const url = document.getElementById('baseUrlInput').value.trim();
+            if (url) {
+                try {
+                    localStorage.setItem('qr_base_url', url);
+                    alert("Saved! Future QR codes will point to this URL.");
+                } catch(e) {
+                    alert("Could not save to local storage (browser restriction).");
+                }
+            }
+        }
+
+        window.downloadQR = function() {
+            const canvas = document.getElementById('qrCanvas');
+            const link = document.createElement('a');
+            link.download = 'dynamic-qr.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+
+        window.closeSuccessModal = function() {
+            document.getElementById('successModal').classList.add('hidden');
+            switchTab('list');
+        }
+
+        function showLoading(show) {
+            const el = document.getElementById('loadingIndicator');
+            if (show) el.classList.remove('hidden');
+            else el.classList.add('hidden');
+        }
+
+        initAuth();
+
+    </script>
+</body>
+</html>
